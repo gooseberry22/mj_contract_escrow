@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database (optional - SQLite is used by default in dev)
+  db:
+    image: postgres:15-alpine
+    container_name: surrogate_escrow_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-surrogate_escrow}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - surrogate_escrow_network
+
+  # Django Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: surrogate_escrow_backend
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./backend:/app
+      - backend_static:/app/static
+      - backend_media:/app/media
+      - backend_db:/app/db
+    ports:
+      - "8000:8000"
+    environment:
+      - DJANGO_SETTINGS_MODULE=core.settings.dev
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-here-change-in-production}
+      - DEBUG=${DEBUG:-True}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+      # Database settings (SQLite by default in dev, PostgreSQL optional)
+      - USE_POSTGRESQL=${USE_POSTGRESQL:-False}
+      - POSTGRES_DB=${POSTGRES_DB:-surrogate_escrow}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+    depends_on:
+      - db
+    restart: unless-stopped
+    networks:
+      - surrogate_escrow_network
+
+  # Vite Frontend Dev Server
+  frontend:
+    image: node:18-alpine
+    container_name: surrogate_escrow_frontend
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - VITE_API_URL=http://localhost/api
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - surrogate_escrow_network
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: surrogate_escrow_nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - backend_static:/app/static:ro
+      - backend_media:/app/media:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+    networks:
+      - surrogate_escrow_network
+
+volumes:
+  postgres_data:
+    driver: local
+  backend_static:
+    driver: local
+  backend_media:
+    driver: local
+  backend_db:
+    driver: local
+  frontend_node_modules:
+    driver: local
+
+networks:
+  surrogate_escrow_network:
+    driver: bridge
+

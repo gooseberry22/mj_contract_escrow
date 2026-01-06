@@ -1,7 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { ArrowLeft, Shield, FileCheck, Bot, AlertCircle, Loader2 } from 'lucide-react';
 import { Logo } from './Logo';
-import { authAPI } from '@/lib/api';
+import { authAPI } from '@/lib/api/index';
 
 interface LoginProps {
   onBack: () => void;

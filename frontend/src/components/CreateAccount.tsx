@@ -1,7 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { Shield, FileCheck, Bot, Bell, Upload, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 import { Logo } from './Logo';
-import { authAPI } from '@/lib/api';
+import { authAPI } from '../lib/api';
 
 interface CreateAccountProps {
   onBack: () => void;

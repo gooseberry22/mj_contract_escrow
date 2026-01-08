@@ -1,7 +1,5 @@
-import { useState, FormEvent } from 'react';
-import { ArrowLeft, Shield, FileCheck, Bot, AlertCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Shield, FileCheck, Bot } from 'lucide-react';
 import { Logo } from './Logo';
-import { authAPI } from 'src/lib/api/auth.ts';
 
 interface LoginProps {
   onBack: () => void;
@@ -10,33 +8,6 @@ interface LoginProps {
 }
 
 export function Login({ onBack, onCreateAccountClick, onLoginSuccess }: LoginProps) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-
-    try {
-      await authAPI.login({ email, password });
-      if (onLoginSuccess) {
-        onLoginSuccess();
-      }
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.detail || 
-                          err.response?.data?.message || 
-                          err.message || 
-                          'Login failed. Please check your credentials and try again.';
-      setError(errorMessage);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-white flex flex-col">
       {/* Header */}
@@ -76,15 +47,7 @@ export function Login({ onBack, onCreateAccountClick, onLoginSuccess }: LoginPro
 
               {/* Form Card */}
               <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-8">
-                <form className="space-y-6" onSubmit={handleSubmit}>
-                  {/* Error Message */}
-                  {error && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-                      <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                      <p className="text-red-800 text-sm">{error}</p>
-                    </div>
-                  )}
-
+                <form className="space-y-6">
                   {/* Email Field */}
                   <div>
                     <label htmlFor="email" className="block text-gray-900 mb-2">
@@ -93,11 +56,7 @@ export function Login({ onBack, onCreateAccountClick, onLoginSuccess }: LoginPro
                     <input
                       type="email"
                       id="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      required
-                      disabled={loading}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                       placeholder="you@example.com"
                     />
                   </div>
@@ -115,11 +74,7 @@ export function Login({ onBack, onCreateAccountClick, onLoginSuccess }: LoginPro
                     <input
                       type="password"
                       id="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                      disabled={loading}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                       placeholder="••••••••"
                     />
                   </div>
@@ -129,10 +84,7 @@ export function Login({ onBack, onCreateAccountClick, onLoginSuccess }: LoginPro
                     <input
                       type="checkbox"
                       id="remember"
-                      checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                      disabled={loading}
-                      className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary disabled:opacity-50"
+                      className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary"
                     />
                     <label htmlFor="remember" className="ml-2 text-gray-700">
                       Remember me
@@ -142,17 +94,10 @@ export function Login({ onBack, onCreateAccountClick, onLoginSuccess }: LoginPro
                   {/* Submit Button */}
                   <button
                     type="submit"
-                    disabled={loading || !email || !password}
-                    className="w-full py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    className="w-full py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity"
+                    onClick={onLoginSuccess}
                   >
-                    {loading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Logging in...
-                      </>
-                    ) : (
-                      'Log In'
-                    )}
+                    Log In
                   </button>
 
                   {/* Create account link */}

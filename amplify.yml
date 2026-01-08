@@ -5,11 +5,14 @@ applications:
       phases:
         preBuild:
           commands:
+            # Verify Node.js and npm versions
             - node --version
             - npm --version
+            # Install dependencies with caching
             - npm ci --cache .npm --prefer-offline
         build:
           commands:
+            # Build the application
             - npm run build
       artifacts:
         baseDirectory: build
@@ -17,13 +20,21 @@ applications:
           - '**/*'
       cache:
         paths:
+          # Cache node_modules for faster builds
           - node_modules/**/*
+          # Cache npm cache directory
           - .npm/**/*
+          # Cache build artifacts (optional, can speed up subsequent builds)
+          - build/**/*
       environment:
         variables:
-          # Vite environment variables
-          # VITE_API_URL will be set from SSM Parameter Store
-          # This is a placeholder - actual value comes from SSM
+          # Node.js version (Node 20.x recommended for Vite 6.3.5)
+          # Amplify will use this version if available
+          NODE_VERSION: '20'
+          # Build environment
           NODE_ENV: production
+          # Vite environment variables
+          # VITE_API_URL should be set in Amplify Console or via SSM Parameter Store
+          # Example: VITE_API_URL=https://api.yourdomain.com/api
 
 

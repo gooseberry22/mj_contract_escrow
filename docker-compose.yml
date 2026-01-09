@@ -67,9 +67,13 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=development
+      # API URL via nginx proxy (nginx serves frontend at / and API at /api/)
+      # When accessed through nginx at http://localhost, this will route to /api/ -> backend
+      # For production builds, set VITE_API_URL in build environment
       - VITE_API_URL=http://localhost/api
     depends_on:
       - backend
+      - nginx
     restart: unless-stopped
     networks:
       - surrogate_escrow_network

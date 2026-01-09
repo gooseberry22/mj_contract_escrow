@@ -18,14 +18,30 @@ applications:
         baseDirectory: build
         files:
           - '**/*'
+      customHeaders:
+        - pattern: '**/*'
+          headers:
+            - key: 'X-Content-Type-Options'
+              value: 'nosniff'
+            - key: 'X-Frame-Options'
+              value: 'DENY'
+            - key: 'X-XSS-Protection'
+              value: '1; mode=block'
+      rewrites:
+        - source: '/<*>'
+          target: '/index.html'
+          status: '200'
+      redirects:
+        # Redirect 404 errors to index.html for SPA routing
+        - source: '/<*>'
+          target: '/index.html'
+          status: '404'
       cache:
         paths:
           # Cache node_modules for faster builds
           - node_modules/**/*
           # Cache npm cache directory
           - .npm/**/*
-          # Cache build artifacts (optional, can speed up subsequent builds)
-          - build/**/*
       environment:
         variables:
           # Node.js version (Node 20.x recommended for Vite 6.3.5)

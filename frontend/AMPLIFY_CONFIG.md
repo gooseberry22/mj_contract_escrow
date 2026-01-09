@@ -52,10 +52,7 @@ The following paths are cached to speed up builds:
 2. **`.npm/**/*`**
    - Caches npm's internal cache
    - Speeds up dependency resolution
-
-3. **`build/**/*`** (optional)
-   - Can cache build artifacts
-   - Useful for incremental builds (if configured)
+   - Reduces network requests for package metadata
 
 ## Environment Variables
 
@@ -85,9 +82,20 @@ The `.nvmrc` file specifies Node.js version 20 for:
 - Documentation purposes
 
 ### Amplify Node.js Version
-Amplify uses the `NODE_VERSION` environment variable in `amplify.yml` to determine which Node.js version to use.
+**Important**: AWS Amplify determines the Node.js version based on the build image, not environment variables.
 
-**Note**: Amplify may not automatically read `.nvmrc`, so we explicitly set `NODE_VERSION` in the environment variables.
+**To set Node.js version in Amplify:**
+1. Go to Amplify Console → Your App → Build settings
+2. Click "Edit" on the build specification
+3. Or configure in Amplify Console → App settings → Build settings
+4. Select Node.js version 20.x (or latest LTS)
+
+**Alternative method (if using Amplify CLI):**
+- The `NODE_VERSION` in `amplify.yml` is documented for reference
+- Amplify's default build images typically include Node.js 18+ and 20+
+- The current configuration works with Amplify's default Node.js 20.x image
+
+**Note**: `.nvmrc` is included for local development and documentation. Amplify uses its build image's Node.js version unless explicitly configured in the Console.
 
 ## Build Optimization Tips
 

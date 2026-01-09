@@ -34,9 +34,16 @@ type Page = 'home' | 'login' | 'create-account' | 'contract-parsing' | 'contract
 type DashboardPage = 'dashboard' | 'payments' | 'milestones' | 'support';
 type SurrogatePage = 'surrogate-dashboard' | 'surrogate-payments' | 'surrogate-lost-wages' | 'support';
 
+// Protected pages that require authentication
+const PROTECTED_PAGES: Page[] = [
+  'dashboard', 'payments', 'milestones', 'surrogate-dashboard', 
+  'surrogate-payments', 'surrogate-lost-wages', 'support', 
+  'surrogate-support', 'contract-parsing', 'contract-template'
+];
+
 export default function App() {
   const dispatch = useAppDispatch();
-  const { isAuthenticated, accessToken } = useAppSelector((state) => state.user);
+  const { isAuthenticated, accessToken, loading } = useAppSelector((state) => state.user);
   const [currentPage, setCurrentPage] = useState<Page>('home');
 
   // Initialize auth state on app load
@@ -46,6 +53,22 @@ export default function App() {
       dispatch(fetchProfile());
     }
   }, [dispatch, accessToken, isAuthenticated]);
+
+  // Handle authentication state changes for redirects
+  useEffect(() => {
+    // Don't redirect while loading
+    if (loading) return;
+
+    // If user becomes authenticated and is on login/create-account, redirect to dashboard
+    if (isAuthenticated && (currentPage === 'login' || currentPage === 'create-account')) {
+      setCurrentPage('dashboard');
+    }
+    
+    // If user becomes unauthenticated and is on a protected page, redirect to login
+    if (!isAuthenticated && PROTECTED_PAGES.includes(currentPage)) {
+      setCurrentPage('login');
+    }
+  }, [isAuthenticated, currentPage, loading]);
 
   if (currentPage === 'thumbnails') {
     return (

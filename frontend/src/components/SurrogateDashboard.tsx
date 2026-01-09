@@ -19,6 +19,7 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { fetchPayments, createPayment } from '../store/slices/paymentsSlice';
 import { fetchMilestones, completeMilestone, uploadMilestoneDocument } from '../store/slices/milestonesSlice';
 import { fetchContracts } from '../store/slices/contractsSlice';
+import { logout } from '../store/slices/userSlice';
 
 interface SurrogateDashboardProps {
   onBack: () => void;
@@ -398,7 +399,14 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
                     Security
                   </a>
                   <hr className="my-2" />
-                  <button onClick={onBack} className="block w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-50">
+                  <button 
+                    onClick={async () => {
+                      setShowUserMenu(false);
+                      await dispatch(logout());
+                      onBack();
+                    }} 
+                    className="block w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-50"
+                  >
                     Log Out
                   </button>
                 </div>

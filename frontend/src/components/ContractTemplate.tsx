@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import logo from 'figma:asset/772aa6854dfe11f4288b7a955fea018059bbad2d.png';
 import { MILESTONE_DATABASE } from '../data/milestoneData';
+import { useAppDispatch } from '../store/hooks';
+import { logout } from '../store/slices/userSlice';
 
 interface ContractTemplateProps {
   onConfirm?: () => void;
@@ -25,6 +27,7 @@ interface ContractTemplateProps {
 }
 
 export function ContractTemplate({ onConfirm, onBack, onNavigate, userType = 'ip', mode = 'onboarding' }: ContractTemplateProps) {
+  const dispatch = useAppDispatch();
   const [showMilestoneDetails, setShowMilestoneDetails] = useState<string[]>([]);
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -115,7 +118,14 @@ export function ContractTemplate({ onConfirm, onBack, onNavigate, userType = 'ip
                         Security
                       </a>
                       <hr className="my-2" />
-                      <button onClick={onBack} className="block w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-50">
+                      <button 
+                        onClick={async () => {
+                          setShowUserMenu(false);
+                          await dispatch(logout());
+                          onBack();
+                        }} 
+                        className="block w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-50"
+                      >
                         Log Out
                       </button>
                     </div>

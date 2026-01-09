@@ -25,6 +25,7 @@ import { toast } from 'sonner';
 import { Logo } from './Logo';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { fetchMilestones, completeMilestone, uploadMilestoneDocument, updateMilestoneStatus } from '../store/slices/milestonesSlice';
+import { logout } from '../store/slices/userSlice';
 
 interface MilestonesProps {
   onBack: () => void;
@@ -218,7 +219,14 @@ export function Milestones({ onBack, onNavigate }: MilestonesProps) {
                     Security
                   </a>
                   <hr className="my-2" />
-                  <button onClick={onBack} className="block w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-50">
+                  <button 
+                    onClick={async () => {
+                      setShowUserMenu(false);
+                      await dispatch(logout());
+                      onBack();
+                    }} 
+                    className="block w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-50"
+                  >
                     Log Out
                   </button>
                 </div>

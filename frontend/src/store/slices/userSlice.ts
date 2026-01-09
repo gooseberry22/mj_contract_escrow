@@ -350,10 +350,18 @@ const userSlice = createSlice({
       .addCase(fetchProfile.fulfilled, (state, action) => {
         state.loading = false;
         state.user = action.payload;
+        state.isAuthenticated = true;
       })
       .addCase(fetchProfile.rejected, (state, action) => {
         state.loading = false;
         state.error = (action.payload as string) || "Failed to fetch profile";
+        state.isAuthenticated = false;
+        state.accessToken = null;
+        state.refreshToken = null;
+        state.user = null;
+        // Clear localStorage on failed profile fetch
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("refreshToken");
       })
       // Update profile
       .addCase(updateProfile.pending, (state) => {

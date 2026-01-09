@@ -1,0 +1,4 @@
+# Local zshrc for this project - auto-activate venv
+if [ -f "${PWD}/.venv/bin/activate" ]; then
+    source "${PWD}/.venv/bin/activate"
+fi

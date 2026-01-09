@@ -1,6 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Shield, FileCheck, Bot, Bell, Upload } from 'lucide-react';
+import { toast } from 'sonner';
 import { Logo } from './Logo';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { signup, clearError } from '../store/slices/userSlice';
 
 interface CreateAccountProps {
   onBack: () => void;
@@ -9,9 +12,34 @@ interface CreateAccountProps {
 }
 
 export function CreateAccount({ onBack, onLoginClick, onContractUploaded }: CreateAccountProps) {
+  const dispatch = useAppDispatch();
+  const { loading, error } = useAppSelector((state) => state.user);
+  
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [role, setRole] = useState<'intended-parent' | 'gestational-carrier'>('intended-parent');
+  const [inviteCode, setInviteCode] = useState('');
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [contractFile, setContractFile] = useState<File | null>(null);
+  const [passwordError, setPasswordError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Clear error when component mounts
+  useEffect(() => {
+    dispatch(clearError());
+  }, [dispatch]);
+
+  // Show error toast when error occurs
+  useEffect(() => {
+    if (error) {
+      toast.error(error);
+      dispatch(clearError());
+    }
+  }, [error, dispatch]);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -27,26 +55,142 @@ export function CreateAccount({ onBack, onLoginClick, onContractUploaded }: Crea
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    // Handle file upload logic here
-    if (onContractUploaded) {
-      onContractUploaded();
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (file.type === 'application/pdf' || 
+          file.type === 'application/msword' || 
+          file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        setContractFile(file);
+        setPasswordError('');
+      } else {
+        const errorMsg = 'Please upload a PDF or DOC file';
+        setPasswordError(errorMsg);
+        toast.error(errorMsg);
+      }
     }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      // Handle file upload
-      if (onContractUploaded) {
-        onContractUploaded();
+      const file = e.target.files[0];
+      if (file.type === 'application/pdf' || 
+          file.type === 'application/msword' || 
+          file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        setContractFile(file);
+        setPasswordError('');
+      } else {
+        const errorMsg = 'Please upload a PDF or DOC file';
+        setPasswordError(errorMsg);
+        toast.error(errorMsg);
       }
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleFileButtonClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const validateForm = (): boolean => {
+    setPasswordError('');
+    
+    if (!firstName.trim()) {
+      const errorMsg = 'First name is required';
+      setPasswordError(errorMsg);
+      toast.error(errorMsg);
+      return false;
+    }
+    
+    if (!lastName.trim()) {
+      const errorMsg = 'Last name is required';
+      setPasswordError(errorMsg);
+      toast.error(errorMsg);
+      return false;
+    }
+    
+    if (!email.trim()) {
+      const errorMsg = 'Email is required';
+      setPasswordError(errorMsg);
+      toast.error(errorMsg);
+      return false;
+    }
+    
+    if (!password) {
+      const errorMsg = 'Password is required';
+      setPasswordError(errorMsg);
+      toast.error(errorMsg);
+      return false;
+    }
+    
+    if (password.length < 8) {
+      const errorMsg = 'Password must be at least 8 characters';
+      setPasswordError(errorMsg);
+      toast.error(errorMsg);
+      return false;
+    }
+    
+    if (password !== confirmPassword) {
+      const errorMsg = 'Passwords do not match';
+      setPasswordError(errorMsg);
+      toast.error(errorMsg);
+      return false;
+    }
+    
+    if (role === 'gestational-carrier' && !inviteCode.trim()) {
+      const errorMsg = 'Invite code is required for gestational carriers';
+      setPasswordError(errorMsg);
+      toast.error(errorMsg);
+      return false;
+    }
+    
+    if (role === 'intended-parent' && !contractFile) {
+      const errorMsg = 'Contract file is required for intended parents';
+      setPasswordError(errorMsg);
+      toast.error(errorMsg);
+      return false;
+    }
+    
+    return true;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // If IP and contract uploaded, go to parsing
-    if (role === 'intended-parent' && onContractUploaded) {
-      onContractUploaded();
+    
+    if (!validateForm()) {
+      return;
+    }
+    
+    // Signup with basic user data
+    const result = await dispatch(signup({
+      email,
+      password,
+      first_name: firstName,
+      last_name: lastName,
+    }));
+    
+    if (signup.fulfilled.match(result)) {
+      toast.success('Account created successfully!');
+      // After successful signup, if there's a contract file, navigate to contract parsing
+      // Note: Contract upload will be handled separately after authentication
+      if (role === 'intended-parent' && contractFile && onContractUploaded) {
+        // Store contract file in sessionStorage for contract parsing page
+        // In a real app, you might want to upload it immediately after login
+        sessionStorage.setItem('pendingContractFile', JSON.stringify({
+          name: contractFile.name,
+          type: contractFile.type,
+          size: contractFile.size,
+        }));
+        onContractUploaded();
+      } else if (onContractUploaded) {
+        // For gestational carriers or if no contract, just navigate
+        onContractUploaded();
+      }
+    } else if (signup.rejected.match(result)) {
+      // Error will be shown via useEffect
+      const errorMessage = result.error?.message || 'Signup failed. Please try again.';
+      if (!error) {
+        toast.error(errorMessage);
+      }
     }
   };
 
@@ -102,7 +246,11 @@ export function CreateAccount({ onBack, onLoginClick, onContractUploaded }: Crea
                       <input
                         type="text"
                         id="firstName"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        required
+                        disabled={loading}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
                         placeholder="Jane"
                       />
                     </div>
@@ -115,7 +263,11 @@ export function CreateAccount({ onBack, onLoginClick, onContractUploaded }: Crea
                       <input
                         type="text"
                         id="lastName"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        required
+                        disabled={loading}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
                         placeholder="Doe"
                       />
                     </div>
@@ -128,7 +280,11 @@ export function CreateAccount({ onBack, onLoginClick, onContractUploaded }: Crea
                       <input
                         type="email"
                         id="email"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                        disabled={loading}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
                         placeholder="you@example.com"
                       />
                     </div>
@@ -141,7 +297,11 @@ export function CreateAccount({ onBack, onLoginClick, onContractUploaded }: Crea
                       <input
                         type="password"
                         id="password"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        disabled={loading}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
                         placeholder="Create a password"
                       />
                     </div>
@@ -154,7 +314,11 @@ export function CreateAccount({ onBack, onLoginClick, onContractUploaded }: Crea
                       <input
                         type="password"
                         id="confirmPassword"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        required
+                        disabled={loading}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
                         placeholder="Re-enter password"
                       />
                     </div>
@@ -172,7 +336,8 @@ export function CreateAccount({ onBack, onLoginClick, onContractUploaded }: Crea
                         value="intended-parent"
                         checked={role === 'intended-parent'}
                         onChange={(e) => setRole(e.target.value as 'intended-parent')}
-                        className="mt-1 w-4 h-4 text-primary border-gray-300 focus:ring-primary"
+                        disabled={loading}
+                        className="mt-1 w-4 h-4 text-primary border-gray-300 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                       <div>
                         <span className="text-gray-900">Intended Parent</span>
@@ -188,7 +353,8 @@ export function CreateAccount({ onBack, onLoginClick, onContractUploaded }: Crea
                         value="gestational-carrier"
                         checked={role === 'gestational-carrier'}
                         onChange={(e) => setRole(e.target.value as 'gestational-carrier')}
-                        className="mt-1 w-4 h-4 text-primary border-gray-300 focus:ring-primary"
+                        disabled={loading}
+                        className="mt-1 w-4 h-4 text-primary border-gray-300 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
                       />
                       <div>
                         <div className="text-gray-900">I have an invite code</div>
@@ -208,7 +374,10 @@ export function CreateAccount({ onBack, onLoginClick, onContractUploaded }: Crea
                       <input
                         type="text"
                         id="inviteCode"
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                        value={inviteCode}
+                        onChange={(e) => setInviteCode(e.target.value)}
+                        disabled={loading}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
                         placeholder="Enter your invite code"
                       />
                     </div>
@@ -233,27 +402,50 @@ export function CreateAccount({ onBack, onLoginClick, onContractUploaded }: Crea
                         className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
                           dragActive 
                             ? 'border-primary bg-primary/5' 
+                            : contractFile
+                            ? 'border-green-500 bg-green-50'
                             : 'border-gray-300 hover:border-gray-400'
                         }`}
                       >
                         <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                        <p className="text-gray-900 mb-2">Drag and drop your contract here</p>
-                        <p className="text-gray-500 text-sm mb-4">or</p>
-                        <button
-                          type="button"
-                          className="px-6 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
-                        >
-                          Upload PDF
-                        </button>
-                        <p className="text-gray-500 text-sm mt-4">PDF or DOC · Max 10 MB</p>
+                        {contractFile ? (
+                          <div>
+                            <p className="text-gray-900 mb-2 font-medium">✓ {contractFile.name}</p>
+                            <p className="text-gray-500 text-sm">{(contractFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                            <button
+                              type="button"
+                              onClick={() => setContractFile(null)}
+                              disabled={loading}
+                              className="mt-2 text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
+                            >
+                              Remove file
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <p className="text-gray-900 mb-2">Drag and drop your contract here</p>
+                            <p className="text-gray-500 text-sm mb-4">or</p>
+                            <button
+                              type="button"
+                              onClick={handleFileButtonClick}
+                              disabled={loading}
+                              className="px-6 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              Upload PDF
+                            </button>
+                            <p className="text-gray-500 text-sm mt-4">PDF or DOC · Max 10 MB</p>
+                          </>
+                        )}
                       </div>
 
                       {/* File Input */}
                       <input
+                        ref={fileInputRef}
                         type="file"
                         accept=".pdf, .doc, .docx"
                         className="hidden"
                         onChange={handleFileSelect}
+                        disabled={loading}
                       />
                     </div>
                   )}
@@ -265,7 +457,8 @@ export function CreateAccount({ onBack, onLoginClick, onContractUploaded }: Crea
                       id="terms"
                       checked={agreedToTerms}
                       onChange={(e) => setAgreedToTerms(e.target.checked)}
-                      className="mt-1 w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary"
+                      disabled={loading}
+                      className="mt-1 w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                     <label htmlFor="terms" className="text-gray-700">
                       I agree to the{' '}
@@ -282,10 +475,10 @@ export function CreateAccount({ onBack, onLoginClick, onContractUploaded }: Crea
                   {/* Submit Button */}
                   <button
                     type="submit"
-                    disabled={!agreedToTerms}
+                    disabled={!agreedToTerms || loading}
                     className="w-full py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Create Account + Build My Journey
+                    {loading ? 'Creating account...' : 'Create Account + Build My Journey'}
                   </button>
 
                   {/* Login Link */}

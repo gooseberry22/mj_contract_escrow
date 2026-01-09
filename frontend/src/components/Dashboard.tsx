@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   CheckCircle, 
   Calendar, 
@@ -21,9 +21,12 @@ import {
   Shield,
   Upload
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Logo } from './Logo';
-import { getPendingMilestonePayments, getCompletedMilestonePayments, reimbursementRequests } from '../data/sharedPaymentData';
-import { getMilestoneById } from '../data/milestoneData';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { fetchContracts } from '../store/slices/contractsSlice';
+import { fetchPayments } from '../store/slices/paymentsSlice';
+import { fetchMilestones } from '../store/slices/milestonesSlice';
 
 interface DashboardProps {
   onBack: () => void;
@@ -31,6 +34,12 @@ interface DashboardProps {
 }
 
 export function Dashboard({ onBack, onNavigate }: DashboardProps) {
+  const dispatch = useAppDispatch();
+  const { contracts, loading: contractsLoading, error: contractsError } = useAppSelector((state) => state.contracts);
+  const { payments, loading: paymentsLoading, error: paymentsError } = useAppSelector((state) => state.payments);
+  const { milestones, loading: milestonesLoading, error: milestonesError } = useAppSelector((state) => state.milestones);
+  const { user } = useAppSelector((state) => state.user);
+
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showW9Modal, setShowW9Modal] = useState(false);
   const [showW9Tooltip, setShowW9Tooltip] = useState(false);
@@ -38,25 +47,100 @@ export function Dashboard({ onBack, onNavigate }: DashboardProps) {
   const [dobValue, setDobValue] = useState('');
   const [licenseFile, setLicenseFile] = useState<File | null>(null);
 
-  // Pull data from shared payment data (driven by surrogate actions)
-  const pendingMilestonePayments = getPendingMilestonePayments().slice(0, 3);
-  const recentActivity = getCompletedMilestonePayments().slice(-2).reverse();
-  
-  // Map upcoming milestones with full milestone data
-  const upcomingMilestones = pendingMilestonePayments.map(p => ({
-    milestoneId: p.milestoneId,
-    milestone: p.milestoneId ? getMilestoneById(p.milestoneId) : null,
-    date: p.date,
-    amount: p.amount,
-    status: p.status,
-    completed: false,
-    actionNeeded: p.status === 'Pending Conditions'
-  }));
+  // Fetch data on mount
+  useEffect(() => {
+    dispatch(fetchContracts());
+    dispatch(fetchPayments());
+    dispatch(fetchMilestones());
+  }, [dispatch]);
 
-  // Mock data
-  const parentName = "Sarah & John";
-  const nextPayment = { date: "Dec 15, 2025", amount: "$8,500" };
-  const currentPhase = "First Trimester";
+  // Show error toasts
+  useEffect(() => {
+    if (contractsError) {
+      toast.error(`Failed to load contracts: ${contractsError}`);
+    }
+    if (paymentsError) {
+      toast.error(`Failed to load payments: ${paymentsError}`);
+    }
+    if (milestonesError) {
+      toast.error(`Failed to load milestones: ${milestonesError}`);
+    }
+  }, [contractsError, paymentsError, milestonesError]);
+
+  const loading = contractsLoading || paymentsLoading || milestonesLoading;
+  const error = contractsError || paymentsError || milestonesError;
+
+  // Get user's name from Redux store
+  const parentName = user ? `${user.first_name} ${user.last_name}` : "User";
+
+  // Get upcoming milestones (pending or in progress)
+  const upcomingMilestones = milestones
+    .filter(m => m.status === 'pending' || m.status === 'in_progress')
+    .sort((a, b) => {
+      const dateA = a.due_date ? new Date(a.due_date).getTime() : 0;
+      const dateB = b.due_date ? new Date(b.due_date).getTime() : 0;
+      return dateA - dateB;
+    })
+    .slice(0, 3)
+    .map(m => ({
+      milestoneId: m.id,
+      milestone: m,
+      date: m.due_date ? new Date(m.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'TBD',
+      amount: `$${parseFloat(m.amount).toLocaleString()}`,
+      status: m.status,
+      completed: m.status === 'completed',
+      actionNeeded: m.status === 'pending' && m.due_date && new Date(m.due_date) <= new Date()
+    }));
+
+  // Get next payment from upcoming milestones
+  const nextMilestone = upcomingMilestones[0];
+  const nextPayment = nextMilestone ? {
+    date: nextMilestone.date,
+    amount: nextMilestone.amount
+  } : { date: "TBD", amount: "$0" };
+
+  // Determine current phase based on milestones (simplified logic)
+  const completedMilestones = milestones.filter(m => m.status === 'completed').length;
+  const totalMilestones = milestones.length;
+  const currentPhase = totalMilestones > 0 
+    ? completedMilestones === 0 
+      ? "First Trimester" 
+      : completedMilestones < totalMilestones / 2 
+      ? "Second Trimester" 
+      : "Third Trimester"
+    : "Setup Phase";
+
+  // Get recent payment activity
+  const recentActivity = payments
+    .filter(p => p.status === 'paid' || p.status === 'completed')
+    .sort((a, b) => {
+      const dateA = a.payment_date ? new Date(a.payment_date).getTime() : 0;
+      const dateB = b.payment_date ? new Date(b.payment_date).getTime() : 0;
+      return dateB - dateA;
+    })
+    .slice(0, 5)
+    .map(p => ({
+      date: p.payment_date ? new Date(p.payment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A',
+      description: p.description || `${p.payment_type} payment`,
+      amount: `$${parseFloat(p.amount).toLocaleString()}`,
+      status: p.status
+    }));
+
+  // Get approved reimbursements (payments with reimbursement type)
+  const approvedReimbursements = payments
+    .filter(p => (p.status === 'approved' || p.status === 'paid') && p.payment_type === 'reimbursement')
+    .sort((a, b) => {
+      const dateA = a.payment_date ? new Date(a.payment_date).getTime() : 0;
+      const dateB = b.payment_date ? new Date(b.payment_date).getTime() : 0;
+      return dateB - dateA;
+    })
+    .slice(0, 5)
+    .map(p => ({
+      title: p.description || 'Reimbursement',
+      date: p.payment_date ? new Date(p.payment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A',
+      amount: `$${parseFloat(p.amount).toLocaleString()}`,
+      status: p.status.charAt(0).toUpperCase() + p.status.slice(1)
+    }));
   
   // Setup progress steps
   const setupSteps = [
@@ -403,104 +487,139 @@ export function Dashboard({ onBack, onNavigate }: DashboardProps) {
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-gray-900">Upcoming Milestones</h3>
-                <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">From milestone database</span>
+                {loading && <span className="text-xs text-gray-500">Loading...</span>}
               </div>
-              <div className="space-y-4">
-                {upcomingMilestones.map((milestone, index) => (
-                  <div key={index} className="flex items-start gap-4 p-4 bg-gray-50 rounded-lg">
-                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
-                      milestone.completed ? 'border-green-500 bg-green-500' : 'border-gray-300 bg-white'
-                    }`}>
-                      {milestone.completed && <CheckCircle className="w-4 h-4 text-white" />}
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-start justify-between mb-1">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-gray-900">{milestone.milestone?.name || 'Unknown Milestone'}</h4>
-                            <span className="text-xs text-gray-400">{milestone.milestoneId}</span>
-                          </div>
-                          {milestone.milestone && (
-                            <p className="text-gray-600 text-xs mt-1">{milestone.milestone.ipPerspective[0]}</p>
-                          )}
+              {error && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+                  Error loading milestones: {error}
+                </div>
+              )}
+              {loading && upcomingMilestones.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">Loading milestones...</div>
+              ) : upcomingMilestones.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">No upcoming milestones</div>
+              ) : (
+                <>
+                  <div className="space-y-4">
+                    {upcomingMilestones.map((milestone) => (
+                      <div key={milestone.milestoneId} className="flex items-start gap-4 p-4 bg-gray-50 rounded-lg">
+                        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                          milestone.completed ? 'border-green-500 bg-green-500' : 'border-gray-300 bg-white'
+                        }`}>
+                          {milestone.completed && <CheckCircle className="w-4 h-4 text-white" />}
                         </div>
-                        {milestone.actionNeeded && (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-800 rounded text-xs">
-                            <AlertCircle className="w-3 h-3" />
-                            Action Needed
-                          </span>
-                        )}
+                        <div className="flex-1">
+                          <div className="flex items-start justify-between mb-1">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="text-gray-900">{milestone.milestone?.title || 'Unknown Milestone'}</h4>
+                              </div>
+                              {milestone.milestone?.description && (
+                                <p className="text-gray-600 text-xs mt-1">{milestone.milestone.description}</p>
+                              )}
+                            </div>
+                            {milestone.actionNeeded && (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-800 rounded text-xs">
+                                <AlertCircle className="w-3 h-3" />
+                                Action Needed
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-gray-600 text-sm">Expected: {milestone.date}</p>
+                          <p className="text-gray-900 mt-1">{milestone.amount}</p>
+                        </div>
                       </div>
-                      <p className="text-gray-600 text-sm">Expected: {milestone.date}</p>
-                      <p className="text-gray-900 mt-1">{milestone.amount}</p>
-                    </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <button className="mt-4 w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
-                View All Milestones
-              </button>
+                  <button 
+                    onClick={() => onNavigate('milestones')}
+                    className="mt-4 w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    View All Milestones
+                  </button>
+                </>
+              )}
             </div>
 
             {/* Section 4 - Reimbursement Requests */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h3 className="text-gray-900 mb-4">Approved Reimbursements</h3>
               <p className="text-gray-600 text-sm mb-4">Recently Approved & Paid</p>
-              <div className="space-y-3">
-                {reimbursementRequests
-                  .filter(request => request.status === 'Approved' || request.status === 'Paid')
-                  .map((request, index) => (
-                  <div key={index} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                    <div className="flex-1">
-                      <h4 className="text-gray-900">{request.title}</h4>
-                      <p className="text-gray-500 text-sm">{request.date}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-gray-900 mb-1">{request.amount}</p>
-                      <span className={`inline-block px-2 py-1 rounded text-xs ${getStatusColor(request.status)}`}>
-                        {request.status}
-                      </span>
-                    </div>
+              {loading && approvedReimbursements.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">Loading reimbursements...</div>
+              ) : approvedReimbursements.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">No approved reimbursements</div>
+              ) : (
+                <>
+                  <div className="space-y-3">
+                    {approvedReimbursements.map((request) => (
+                      <div key={`${request.title}-${request.date}`} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                        <div className="flex-1">
+                          <h4 className="text-gray-900">{request.title}</h4>
+                          <p className="text-gray-500 text-sm">{request.date}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-gray-900 mb-1">{request.amount}</p>
+                          <span className={`inline-block px-2 py-1 rounded text-xs ${getStatusColor(request.status)}`}>
+                            {request.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <button className="mt-4 w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
-                View All Requests
-              </button>
+                  <button 
+                    onClick={() => onNavigate('payments')}
+                    className="mt-4 w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    View All Requests
+                  </button>
+                </>
+              )}
             </div>
 
             {/* Section 5 - Payment Activity */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h3 className="text-gray-900 mb-4">Payment Activity</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-200">
-                      <th className="text-left py-3 px-4 text-gray-600 text-sm">Date</th>
-                      <th className="text-left py-3 px-4 text-gray-600 text-sm">Description</th>
-                      <th className="text-right py-3 px-4 text-gray-600 text-sm">Amount</th>
-                      <th className="text-right py-3 px-4 text-gray-600 text-sm">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentActivity.map((payment, index) => (
-                      <tr key={index} className="border-b border-gray-100">
-                        <td className="py-3 px-4 text-gray-700">{payment.date}</td>
-                        <td className="py-3 px-4 text-gray-700">{payment.description}</td>
-                        <td className="py-3 px-4 text-gray-900 text-right">{payment.amount}</td>
-                        <td className="py-3 px-4 text-right">
-                          <span className={`inline-block px-2 py-1 rounded text-xs ${getStatusColor(payment.status)}`}>
-                            {payment.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <button className="mt-4 w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
-                Transaction History
-              </button>
+              {loading && recentActivity.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">Loading payment activity...</div>
+              ) : recentActivity.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">No recent payment activity</div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200">
+                          <th className="text-left py-3 px-4 text-gray-600 text-sm">Date</th>
+                          <th className="text-left py-3 px-4 text-gray-600 text-sm">Description</th>
+                          <th className="text-right py-3 px-4 text-gray-600 text-sm">Amount</th>
+                          <th className="text-right py-3 px-4 text-gray-600 text-sm">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {recentActivity.map((payment, index) => (
+                          <tr key={`${payment.date}-${index}`} className="border-b border-gray-100">
+                            <td className="py-3 px-4 text-gray-700">{payment.date}</td>
+                            <td className="py-3 px-4 text-gray-700">{payment.description}</td>
+                            <td className="py-3 px-4 text-gray-900 text-right">{payment.amount}</td>
+                            <td className="py-3 px-4 text-right">
+                              <span className={`inline-block px-2 py-1 rounded text-xs ${getStatusColor(payment.status)}`}>
+                                {payment.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <button 
+                    onClick={() => onNavigate('payments')}
+                    className="mt-4 w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    Transaction History
+                  </button>
+                </>
+              )}
             </div>
           </div>
 

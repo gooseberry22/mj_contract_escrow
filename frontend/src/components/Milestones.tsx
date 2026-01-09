@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   CheckCircle, 
   Calendar, 
@@ -18,10 +18,13 @@ import {
   Baby,
   Home,
   ChevronRight,
-  Users
+  Users,
+  Upload
 } from 'lucide-react';
-import logo from 'figma:asset/772aa6854dfe11f4288b7a955fea018059bbad2d.png';
-import { getMilestoneById } from '../data/milestoneData';
+import { toast } from 'sonner';
+import { Logo } from './Logo';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { fetchMilestones, completeMilestone, uploadMilestoneDocument, updateMilestoneStatus } from '../store/slices/milestonesSlice';
 
 interface MilestonesProps {
   onBack: () => void;
@@ -29,85 +32,106 @@ interface MilestonesProps {
 }
 
 export function Milestones({ onBack, onNavigate }: MilestonesProps) {
+  const dispatch = useAppDispatch();
+  const { milestones, loading, error } = useAppSelector((state) => state.milestones);
+  
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showCompletedMilestones, setShowCompletedMilestones] = useState(false);
+  const [selectedMilestone, setSelectedMilestone] = useState<number | null>(null);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
 
-  // Mock data for journey stages
+  // Fetch milestones on mount
+  useEffect(() => {
+    dispatch(fetchMilestones());
+  }, [dispatch]);
+
+  // Show error toast
+  useEffect(() => {
+    if (error) {
+      toast.error(`Failed to load milestones: ${error}`);
+    }
+  }, [error]);
+
+  // Separate milestones by status
+  const upcomingMilestones = milestones
+    .filter(m => m.status === 'pending' || m.status === 'in_progress')
+    .sort((a, b) => {
+      const dateA = a.due_date ? new Date(a.due_date).getTime() : 0;
+      const dateB = b.due_date ? new Date(b.due_date).getTime() : 0;
+      return dateA - dateB;
+    })
+    .map(m => ({
+      id: m.id,
+      name: m.title,
+      amount: `$${parseFloat(m.amount).toLocaleString()}`,
+      reference: `Milestone #${m.id}`,
+      status: m.status === 'pending' ? 'Upcoming' : m.status === 'in_progress' ? 'Triggered' : 'Upcoming',
+      condition: m.description || 'Pending completion',
+      date: m.due_date ? `Expected ${new Date(m.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : 'TBD',
+      milestone: m
+    }));
+
+  const completedMilestones = milestones
+    .filter(m => m.status === 'completed')
+    .sort((a, b) => {
+      const dateA = a.completed_date ? new Date(a.completed_date).getTime() : 0;
+      const dateB = b.completed_date ? new Date(b.completed_date).getTime() : 0;
+      return dateB - dateA; // Newest first
+    })
+    .map(m => ({
+      id: m.id,
+      name: m.title,
+      amount: `$${parseFloat(m.amount).toLocaleString()}`,
+      reference: `Milestone #${m.id}`,
+      datePaid: m.completed_date ? new Date(m.completed_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A',
+      milestone: m
+    }));
+
+  // Calculate journey progress based on milestones
+  const completedCount = completedMilestones.length;
+  const totalCount = milestones.length;
+  const progressPercentage = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+
+  // Mock data for journey stages (could be enhanced with real milestone data)
   const milestoneStages = [
-    { name: 'Matching', icon: Users, status: 'completed' },
-    { name: 'Legal & Medical', icon: FileText, status: 'completed' },
-    { name: 'Medications', icon: Pill, status: 'completed' },
-    { name: 'Pregnancy Confirmation', icon: Heart, status: 'completed' },
-    { name: 'Monthly Compensation', icon: Baby, status: 'current' },
-    { name: 'Delivery', icon: Home, status: 'upcoming' },
+    { name: 'Matching', icon: Users, status: completedCount > 0 ? 'completed' : 'upcoming' },
+    { name: 'Legal & Medical', icon: FileText, status: completedCount > 1 ? 'completed' : completedCount > 0 ? 'current' : 'upcoming' },
+    { name: 'Medications', icon: Pill, status: completedCount > 2 ? 'completed' : completedCount > 1 ? 'current' : 'upcoming' },
+    { name: 'Pregnancy Confirmation', icon: Heart, status: completedCount > 3 ? 'completed' : completedCount > 2 ? 'current' : 'upcoming' },
+    { name: 'Monthly Compensation', icon: Baby, status: completedCount > 4 ? 'completed' : completedCount > 3 ? 'current' : 'upcoming' },
+    { name: 'Delivery', icon: Home, status: completedCount > 5 ? 'completed' : completedCount > 4 ? 'current' : 'upcoming' },
   ];
 
-  // Pull milestones from database
-  const heartbeatMilestone = getMilestoneById('B2');
-  const monthlyCompMilestone = getMilestoneById('C1');
-  const clothingMilestone = getMilestoneById('F1');
-  const deliveryMilestone = getMilestoneById('D1');
-  
-  // Mock data for milestone payment schedule - using database
-  const upcomingMilestones = [
-    {
-      name: heartbeatMilestone?.name || 'Heartbeat Confirmation',
-      amount: '$7,500',
-      reference: heartbeatMilestone?.contractClause || 'Section 4.3',
-      status: 'Triggered',
-      condition: heartbeatMilestone?.documentsRequired.join(', ') || 'Pending medical confirmation from clinic',
-      date: 'Expected Dec 10, 2025',
-      milestoneId: 'B2'
-    },
-    {
-      name: monthlyCompMilestone?.name || 'Monthly Base Compensation',
-      amount: '$5,000',
-      reference: monthlyCompMilestone?.contractClause || 'Section 4.4',
-      status: 'Upcoming',
-      condition: monthlyCompMilestone?.ipPerspective[0] || 'Ongoing monthly payments',
-      date: 'Projected Jan 1, 2026',
-      milestoneId: 'C1'
-    },
-    {
-      name: clothingMilestone?.name || 'Maternity Clothing Allowance',
-      amount: '$1,000',
-      reference: clothingMilestone?.contractClause || 'Section 4.5',
-      status: 'Upcoming',
-      condition: clothingMilestone?.ipPerspective[0] || 'Upon submission of receipts',
-      date: 'Projected Feb 5, 2026',
-      milestoneId: 'F1'
-    },
-    {
-      name: deliveryMilestone?.name || 'Delivery / Birth',
-      amount: '$15,000',
-      reference: deliveryMilestone?.contractClause || 'Section 5.1',
-      status: 'Upcoming',
-      condition: deliveryMilestone?.documentsRequired.join(', ') || 'Upon successful delivery',
-      date: 'Projected Jul 15, 2026',
-      milestoneId: 'D1'
-    },
-  ];
+  const handleCompleteMilestone = async (milestoneId: number) => {
+    const result = await dispatch(completeMilestone({ id: milestoneId, completion_notes: '' }));
+    if (completeMilestone.fulfilled.match(result)) {
+      toast.success('Milestone marked as complete');
+      // Refresh milestones list
+      dispatch(fetchMilestones());
+    } else if (completeMilestone.rejected.match(result)) {
+      const errorMessage = result.error?.message || 'Failed to complete milestone';
+      toast.error(errorMessage);
+    }
+  };
 
-  // Pull completed milestones from database
-  const embryoTransferMilestone = getMilestoneById('A5');
-  const legalClearanceMilestone = getMilestoneById('A2');
-  
-  const completedMilestones = [
-    {
-      name: embryoTransferMilestone?.name || 'Embryo Transfer',
-      amount: '$1,500',
-      reference: embryoTransferMilestone?.contractClause || 'Section 4.2',
-      datePaid: 'Nov 15, 2025',
-      milestoneId: 'A5'
-    },
-    {
-      name: legalClearanceMilestone?.name || 'Legal Clearance Payment',
-      amount: '$1,000',
-      reference: legalClearanceMilestone?.contractClause || 'Section 3.2',
-      datePaid: 'Oct 1, 2025',
-      milestoneId: 'A2'
-    },
-  ];
+  const handleUploadDocument = async (milestoneId: number, file: File) => {
+    setUploadingDocument(true);
+    const result = await dispatch(uploadMilestoneDocument({
+      milestoneId,
+      title: file.name,
+      file
+    }));
+    setUploadingDocument(false);
+    if (uploadMilestoneDocument.fulfilled.match(result)) {
+      toast.success('Document uploaded successfully');
+      setSelectedMilestone(null);
+      // Refresh milestones list
+      dispatch(fetchMilestones());
+    } else if (uploadMilestoneDocument.rejected.match(result)) {
+      const errorMessage = result.error?.message || 'Failed to upload document';
+      toast.error(errorMessage);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
@@ -144,8 +168,8 @@ export function Milestones({ onBack, onNavigate }: MilestonesProps) {
           <div className="flex items-center justify-between">
             {/* Logo */}
             <button onClick={onBack} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-              <img src={logo} alt="The Biggest Ask" className="h-10 w-10" />
-              <span className="text-gray-900">The Biggest Ask</span>
+              <Logo />
+              <span className="text-gray-900">TBA Surrogacy Escrow</span>
             </button>
 
             {/* Navigation */}
@@ -219,12 +243,20 @@ export function Milestones({ onBack, onNavigate }: MilestonesProps) {
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h3 className="text-gray-900 mb-6">Journey Overview</h3>
               
-              {/* Horizontal Progress Indicator */}
-              <div className="relative">
-                {/* Progress Line */}
-                <div className="absolute top-6 left-0 right-0 h-0.5 bg-gray-200" style={{ width: 'calc(100% - 48px)', marginLeft: '24px' }}>
-                  <div className="h-full bg-green-500" style={{ width: '42%' }}></div>
+              {loading ? (
+                <div className="text-center py-8 text-gray-500">Loading milestones...</div>
+              ) : error ? (
+                <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+                  Error loading milestones: {error}
                 </div>
+              ) : (
+                <>
+                  {/* Horizontal Progress Indicator */}
+                  <div className="relative">
+                    {/* Progress Line */}
+                    <div className="absolute top-6 left-0 right-0 h-0.5 bg-gray-200" style={{ width: 'calc(100% - 48px)', marginLeft: '24px' }}>
+                      <div className="h-full bg-green-500" style={{ width: `${progressPercentage}%` }}></div>
+                    </div>
 
                 {/* Stages */}
                 <div className="relative flex items-start justify-between">
@@ -247,43 +279,81 @@ export function Milestones({ onBack, onNavigate }: MilestonesProps) {
                   })}
                 </div>
               </div>
+              <div className="mt-4 text-center text-sm text-gray-600">
+                {completedCount} of {totalCount} milestones completed ({Math.round(progressPercentage)}%)
+              </div>
+                </>
+              )}
             </div>
 
             {/* Section 2 - Milestone Payment Schedule */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h3 className="text-gray-900 mb-4">Milestone Payment Schedule</h3>
-              <div className="space-y-4">
-                {upcomingMilestones.map((milestone, index) => (
-                  <div key={index} className="p-4 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-1">
-                          <h4 className="text-gray-900">{milestone.name}</h4>
-                          <span className={`inline-block px-2 py-1 rounded text-xs border ${getStatusColor(milestone.status)}`}>
-                            {milestone.status}
-                          </span>
+              {loading && upcomingMilestones.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">Loading upcoming milestones...</div>
+              ) : error ? (
+                <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+                  Error loading milestones: {error}
+                </div>
+              ) : upcomingMilestones.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">No upcoming milestones</div>
+              ) : (
+                <div className="space-y-4">
+                  {upcomingMilestones.map((milestone) => (
+                    <div key={milestone.id} className="p-4 border border-gray-200 rounded-lg hover:border-gray-300 transition-colors">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-1">
+                            <h4 className="text-gray-900">{milestone.name}</h4>
+                            <span className={`inline-block px-2 py-1 rounded text-xs border ${getStatusColor(milestone.status)}`}>
+                              {milestone.status}
+                            </span>
+                          </div>
+                          <p className="text-gray-500 text-sm">Contract Reference: {milestone.reference}</p>
                         </div>
-                        <p className="text-gray-500 text-sm">Contract Reference: {milestone.reference}</p>
+                        <div className="text-right">
+                          <p className="text-gray-900">{milestone.amount}</p>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-gray-900">{milestone.amount}</p>
+                      <div className="flex items-start gap-2 text-sm">
+                        <div className="flex-1">
+                          <p className="text-gray-600 mb-1">
+                            <span className="text-gray-700">Trigger: </span>
+                            {milestone.condition}
+                          </p>
+                          <p className="text-gray-600 flex items-center gap-1">
+                            <Calendar className="w-4 h-4" />
+                            {milestone.date}
+                          </p>
+                        </div>
                       </div>
+                      {milestone.milestone.status === 'in_progress' && (
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            onClick={() => handleCompleteMilestone(milestone.id)}
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+                          >
+                            Mark as Complete
+                          </button>
+                          <label className="px-4 py-2 bg-primary text-white rounded-lg hover:opacity-90 transition-opacity text-sm cursor-pointer">
+                            <input
+                              type="file"
+                              className="hidden"
+                              onChange={(e) => {
+                                if (e.target.files && e.target.files[0]) {
+                                  handleUploadDocument(milestone.id, e.target.files[0]);
+                                }
+                              }}
+                              disabled={uploadingDocument}
+                            />
+                            {uploadingDocument ? 'Uploading...' : 'Upload Document'}
+                          </label>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-start gap-2 text-sm">
-                      <div className="flex-1">
-                        <p className="text-gray-600 mb-1">
-                          <span className="text-gray-700">Trigger: </span>
-                          {milestone.condition}
-                        </p>
-                        <p className="text-gray-600 flex items-center gap-1">
-                          <Calendar className="w-4 h-4" />
-                          {milestone.date}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Section 3 - Completed Milestones */}
@@ -298,31 +368,42 @@ export function Milestones({ onBack, onNavigate }: MilestonesProps) {
               
               {showCompletedMilestones && (
                 <>
-                  <div className="space-y-3 mb-4">
-                    {completedMilestones.map((milestone, index) => (
-                      <div key={index} className="p-4 bg-gray-50 rounded-lg opacity-75">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <CheckCircle className="w-4 h-4 text-green-600" />
-                              <h4 className="text-gray-900">{milestone.name}</h4>
+                  {loading && completedMilestones.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">Loading completed milestones...</div>
+                  ) : completedMilestones.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">No completed milestones yet</div>
+                  ) : (
+                    <>
+                      <div className="space-y-3 mb-4">
+                        {completedMilestones.map((milestone) => (
+                          <div key={milestone.id} className="p-4 bg-gray-50 rounded-lg opacity-75">
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <CheckCircle className="w-4 h-4 text-green-600" />
+                                  <h4 className="text-gray-900">{milestone.name}</h4>
+                                </div>
+                                <p className="text-gray-500 text-sm">Contract Reference: {milestone.reference}</p>
+                                <p className="text-gray-600 text-sm mt-1">Completed on {milestone.datePaid}</p>
+                                {milestone.milestone.completion_notes && (
+                                  <p className="text-gray-600 text-sm mt-1 italic">{milestone.milestone.completion_notes}</p>
+                                )}
+                              </div>
+                              <div className="text-right">
+                                <p className="text-gray-900">{milestone.amount}</p>
+                              </div>
                             </div>
-                            <p className="text-gray-500 text-sm">Contract Reference: {milestone.reference}</p>
-                            <p className="text-gray-600 text-sm mt-1">Paid on {milestone.datePaid}</p>
                           </div>
-                          <div className="text-right">
-                            <p className="text-gray-900">{milestone.amount}</p>
-                          </div>
-                        </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                  <button 
-                    onClick={() => onNavigate('payments')}
-                    className="w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
-                  >
-                    View All Transactions
-                  </button>
+                      <button 
+                        onClick={() => onNavigate('payments')}
+                        className="w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                      >
+                        View All Transactions
+                      </button>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -413,7 +494,7 @@ export function Milestones({ onBack, onNavigate }: MilestonesProps) {
                 Support
               </a>
             </div>
-            <p className="text-gray-500 text-sm">© 2025 The Biggest Ask</p>
+            <p className="text-gray-500 text-sm">© 2025 TBA Surrogacy Escrow</p>
           </div>
         </div>
       </footer>

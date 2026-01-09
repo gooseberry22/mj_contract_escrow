@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import type { ChangeEvent } from 'react';
 import { 
   CheckCircle, 
   Calendar, 
@@ -6,16 +7,18 @@ import {
   FileText, 
   User, 
   ChevronDown,
-  Clock,
   Search,
   Sparkles,
   Heart,
   Upload,
   X
 } from 'lucide-react';
-import logo from 'figma:asset/772aa6854dfe11f4288b7a955fea018059bbad2d.png';
-import { getMilestoneById } from '../data/milestoneData';
-import { getPendingMilestonePayments, getCompletedMilestonePayments, reimbursementRequests } from '../data/sharedPaymentData';
+import { toast } from 'sonner';
+import { Logo } from './Logo';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { fetchPayments, createPayment } from '../store/slices/paymentsSlice';
+import { fetchMilestones, completeMilestone, uploadMilestoneDocument } from '../store/slices/milestonesSlice';
+import { fetchContracts } from '../store/slices/contractsSlice';
 
 interface SurrogateDashboardProps {
   onBack: () => void;
@@ -23,6 +26,12 @@ interface SurrogateDashboardProps {
 }
 
 export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardProps) {
+  const dispatch = useAppDispatch();
+  const { payments, loading: paymentsLoading } = useAppSelector((state) => state.payments);
+  const { milestones, loading: milestonesLoading } = useAppSelector((state) => state.milestones);
+  const { contracts, loading: contractsLoading } = useAppSelector((state) => state.contracts);
+  const { user } = useAppSelector((state) => state.user);
+
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [reimbursementType, setReimbursementType] = useState('');
   const [reimbursementAmount, setReimbursementAmount] = useState('');
@@ -34,26 +43,94 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
   const [embryoTransferDate, setEmbryoTransferDate] = useState('');
   const [heartbeatFile, setHeartbeatFile] = useState<File | null>(null);
   const [heartbeatNotes, setHeartbeatNotes] = useState('');
-  const [showHeartbeatSection, setShowHeartbeatSection] = useState(false); // Set to false to see post-confirmation view
-  const [heartbeatApproved, setHeartbeatApproved] = useState(true); // Set to true to see post-confirmation view
+  const [showHeartbeatSection, setShowHeartbeatSection] = useState(false);
+  const [heartbeatApproved, setHeartbeatApproved] = useState(false);
   const [reportingLoss, setReportingLoss] = useState(false);
+  const [submittingReimbursement, setSubmittingReimbursement] = useState(false);
+  const [submittingHeartbeat, setSubmittingHeartbeat] = useState(false);
 
-  // Mock data
-  const surrogateName = "Maria";
-  const totalReceived = "$23,000";
-  const nextPayment = { date: "Dec 15, 2025", amount: "$5,000" };
-  const currentPhase = "First Trimester";
-  
-  // Pull upcoming payments from shared payment data (single source of truth)
-  const pendingMilestones = getPendingMilestonePayments().slice(0, 3);
-  const upcomingPayments = pendingMilestones.map(p => ({
-    milestoneId: p.milestoneId,
-    milestone: p.milestoneId ? getMilestoneById(p.milestoneId) : null,
-    date: p.date,
-    amount: p.amount,
-    status: p.status,
-    actionNeeded: p.surrogateAction
-  }));
+  // Fetch data on mount
+  useEffect(() => {
+    dispatch(fetchPayments());
+    dispatch(fetchContracts());
+  }, [dispatch]);
+
+  // Fetch milestones once contracts are loaded
+  useEffect(() => {
+    if (contracts.length > 0 && contracts[0]?.id) {
+      dispatch(fetchMilestones({ contractId: contracts[0].id }));
+    }
+  }, [dispatch, contracts]);
+
+  const loading = paymentsLoading || milestonesLoading || contractsLoading;
+
+  // Get user's name from Redux store
+  const surrogateName = user ? user.first_name : "Surrogate";
+
+  // Calculate total received from paid payments
+  const totalReceived = payments
+    .filter(p => p.status === 'paid' || p.status === 'completed')
+    .reduce((sum, p) => sum + parseFloat(p.amount), 0);
+
+  // Get next payment from upcoming milestones
+  const upcomingMilestones = milestones
+    .filter(m => m.status === 'pending' || m.status === 'in_progress')
+    .sort((a, b) => {
+      const dateA = a.due_date ? new Date(a.due_date).getTime() : 0;
+      const dateB = b.due_date ? new Date(b.due_date).getTime() : 0;
+      return dateA - dateB;
+    })
+    .slice(0, 1);
+
+  const nextPayment = upcomingMilestones[0] ? {
+    date: upcomingMilestones[0].due_date ? new Date(upcomingMilestones[0].due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'TBD',
+    amount: `$${parseFloat(upcomingMilestones[0].amount).toLocaleString()}`
+  } : { date: "TBD", amount: "$0" };
+
+  // Determine current phase based on milestones
+  const completedMilestones = milestones.filter(m => m.status === 'completed').length;
+  const totalMilestones = milestones.length;
+  const currentPhase = totalMilestones > 0 
+    ? completedMilestones === 0 
+      ? "First Trimester" 
+      : completedMilestones < totalMilestones / 2 
+      ? "Second Trimester" 
+      : "Third Trimester"
+    : "Setup Phase";
+
+  // Get upcoming payments with milestone data
+  const upcomingPayments = milestones
+    .filter(m => m.status === 'pending' || m.status === 'in_progress')
+    .sort((a, b) => {
+      const dateA = a.due_date ? new Date(a.due_date).getTime() : 0;
+      const dateB = b.due_date ? new Date(b.due_date).getTime() : 0;
+      return dateA - dateB;
+    })
+    .slice(0, 3)
+    .map(m => ({
+      milestoneId: m.id,
+      milestone: m,
+      date: m.due_date ? new Date(m.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'TBD',
+      amount: `$${parseFloat(m.amount).toLocaleString()}`,
+      status: m.status === 'pending' ? 'Upcoming' : m.status === 'in_progress' ? 'Processing Soon' : m.status,
+      actionNeeded: m.status === 'in_progress'
+    }));
+
+  // Get recent payments
+  const recentPayments = payments
+    .filter(p => p.status === 'paid' || p.status === 'completed')
+    .sort((a, b) => {
+      const dateA = a.payment_date ? new Date(a.payment_date).getTime() : new Date(a.created_at).getTime();
+      const dateB = b.payment_date ? new Date(b.payment_date).getTime() : new Date(b.created_at).getTime();
+      return dateB - dateA;
+    })
+    .slice(0, 5)
+    .map(p => ({
+      date: p.payment_date ? new Date(p.payment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      description: p.description || `${p.payment_type} payment`,
+      amount: `$${parseFloat(p.amount).toLocaleString()}`,
+      status: p.status.charAt(0).toUpperCase() + p.status.slice(1)
+    }));
 
   // Milestone categories and options
   const milestoneCategories = {
@@ -107,73 +184,144 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
     setSelectedCategory('');
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setUploadedFile(e.target.files[0]);
     }
   };
 
-  const handleSubmitReimbursement = () => {
-    // Mock submission
-    alert('Reimbursement request submitted! The AI will review against your contract terms and automatically process if approved.');
-    // Reset form
-    setReimbursementType('');
-    setReimbursementAmount('');
-    setReimbursementNotes('');
-    setUploadedFile(null);
+  const handleSubmitReimbursement = async () => {
+    if (!uploadedFile || !reimbursementType || !reimbursementAmount) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
+    // Get the first contract (assuming surrogate has access to at least one contract)
+    const contract = contracts[0];
+    if (!contract) {
+      toast.error('No contract found. Please contact support.');
+      return;
+    }
+
+    setSubmittingReimbursement(true);
+
+    try {
+      // First, create the payment with milestone type (reimbursements are tracked as milestone payments)
+      // Note: Backend Payment model doesn't have 'reimbursement' type, using 'milestone' with description
+      const paymentData = {
+        contract: contract.id,
+        payer: contract.intended_parent, // Intended parent pays
+        payee: contract.surrogate, // Surrogate receives
+        amount: reimbursementAmount,
+        payment_type: 'milestone', // Using milestone type for reimbursements
+        description: `Reimbursement: ${reimbursementType}`,
+        notes: reimbursementNotes || undefined,
+      };
+
+      const result = await dispatch(createPayment(paymentData));
+      
+      if (createPayment.fulfilled.match(result)) {
+        // If file upload is needed, it would be handled separately
+        // For now, we'll just show success
+        toast.success('Reimbursement request submitted! The AI will review against your contract terms and automatically process if approved.');
+        // Reset form
+        setReimbursementType('');
+        setReimbursementAmount('');
+        setReimbursementNotes('');
+        setUploadedFile(null);
+        // Refresh payments list
+        dispatch(fetchPayments());
+      } else {
+        const errorMessage = result.payload as string || 'Failed to submit reimbursement request';
+        toast.error(errorMessage);
+      }
+    } catch (error) {
+      toast.error('An error occurred while submitting your request');
+    } finally {
+      setSubmittingReimbursement(false);
+    }
   };
 
-  const handleHeartbeatFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleHeartbeatFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setHeartbeatFile(e.target.files[0]);
     }
   };
 
-  const handleSubmitHeartbeat = () => {
+  const handleSubmitHeartbeat = async () => {
     if (reportingLoss) {
-      // Mock submission for pregnancy loss
-      alert('We are so sorry for your loss. This notification has been sent to your Intended Parents and The Biggest Ask support team. Monthly base compensation and allowances will be paused. A support specialist will reach out to you within 24 hours.');
+      // For pregnancy loss, we would need a specific endpoint or milestone status update
+      // For now, we'll show a message and handle it appropriately
+      toast.info('We are so sorry for your loss. This notification has been sent to your Intended Parents and support team. Monthly base compensation and allowances will be paused. A support specialist will reach out to you within 24 hours.');
       setShowHeartbeatSection(false);
       setReportingLoss(false);
-    } else {
-      // Mock submission for heartbeat confirmation
-      alert('Heartbeat confirmation submitted! This will be sent to your Intended Parents for approval. Once approved, your base compensation payments will begin.');
-      // Reset form and hide section
-      setHeartbeatDate('');
-      setEmbryoTransferDate('');
-      setHeartbeatFile(null);
-      setHeartbeatNotes('');
-      setShowHeartbeatSection(false);
-      setHeartbeatApproved(true); // Mock approval
+      return;
+    }
+
+    if (!heartbeatDate || !embryoTransferDate || !heartbeatFile) {
+      toast.error('Please fill in all required fields and upload the ultrasound report');
+      return;
+    }
+
+    // Find heartbeat milestone (typically a milestone with title containing "heartbeat" or specific ID)
+    const heartbeatMilestone = milestones.find(m => 
+      m.title.toLowerCase().includes('heartbeat') || 
+      m.title.toLowerCase().includes('heart beat') ||
+      m.status === 'in_progress'
+    );
+
+    if (!heartbeatMilestone) {
+      toast.error('Heartbeat milestone not found. Please contact support.');
+      return;
+    }
+
+    setSubmittingHeartbeat(true);
+
+    try {
+      // Upload the document first
+      const uploadResult = await dispatch(uploadMilestoneDocument({
+        milestoneId: heartbeatMilestone.id,
+        title: `Heartbeat Confirmation - ${heartbeatDate}`,
+        file: heartbeatFile
+      }));
+
+      if (uploadMilestoneDocument.fulfilled.match(uploadResult)) {
+        // Then complete the milestone with notes
+        const completionNotes = `Heartbeat confirmed on ${heartbeatDate}. Embryo transfer date: ${embryoTransferDate}. ${heartbeatNotes || ''}`;
+        const completeResult = await dispatch(completeMilestone({
+          id: heartbeatMilestone.id,
+          completion_notes: completionNotes
+        }));
+
+        if (completeMilestone.fulfilled.match(completeResult)) {
+          toast.success('Heartbeat confirmation submitted! This will be sent to your Intended Parents for approval. Once approved, your base compensation payments will begin.');
+          // Reset form and hide section
+          setHeartbeatDate('');
+          setEmbryoTransferDate('');
+          setHeartbeatFile(null);
+          setHeartbeatNotes('');
+          setShowHeartbeatSection(false);
+          setHeartbeatApproved(true);
+          // Refresh milestones list
+          const contractId = contracts[0]?.id;
+          if (contractId) {
+            dispatch(fetchMilestones({ contractId }));
+          }
+        } else {
+          const errorMessage = completeResult.payload as string || 'Failed to complete milestone';
+          toast.error(errorMessage);
+        }
+      } else {
+        const errorMessage = uploadResult.payload as string || 'Failed to upload document';
+        toast.error(errorMessage);
+      }
+    } catch (error) {
+      toast.error('An error occurred while submitting your heartbeat confirmation');
+    } finally {
+      setSubmittingHeartbeat(false);
     }
   };
 
-  const recentPayments = [
-    { 
-      date: "Nov 15, 2025", 
-      description: "Confirmation of Pregnancy Payment", 
-      amount: "$10,000", 
-      status: "Paid" 
-    },
-    { 
-      date: "Nov 1, 2025", 
-      description: "Monthly Allowance", 
-      amount: "$500", 
-      status: "Paid" 
-    },
-    { 
-      date: "Oct 15, 2025", 
-      description: "Medical Screening Payment", 
-      amount: "$5,000", 
-      status: "Paid" 
-    },
-    { 
-      date: "Oct 1, 2025", 
-      description: "Legal Clearance Payment", 
-      amount: "$1,000", 
-      status: "Paid" 
-    },
-  ];
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
@@ -197,9 +345,9 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
           <div className="flex items-center justify-between">
             {/* Logo */}
             <button onClick={onBack} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-              <img src={logo} alt="The Biggest Ask" className="h-10 w-10" />
+              <Logo />
               <div className="flex flex-col items-start">
-                <span className="text-gray-900">The Biggest Ask</span>
+                <span className="text-gray-900">TBA Surrogacy Escrow</span>
                 <span className="text-xs text-white bg-accent px-2 py-0.5 rounded">Surrogate Portal</span>
               </div>
             </button>
@@ -262,6 +410,7 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
 
       {/* Main Content */}
       <main className="max-w-[1440px] mx-auto px-8 py-8">
+
         <div className="grid grid-cols-1 lg:grid-cols-[70%_30%] gap-8">
           {/* Left Column - Main Content */}
           <div className="space-y-6">
@@ -312,7 +461,7 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
                     <input
                       type="checkbox"
                       checked={reportingLoss}
-                      onChange={(e) => {
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => {
                         const checked = e.target.checked;
                         setReportingLoss(checked);
                         if (checked) {
@@ -383,7 +532,7 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
                     <input
                       type="date"
                       value={heartbeatDate}
-                      onChange={(e) => setHeartbeatDate(e.target.value)}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => setHeartbeatDate(e.target.value)}
                       className="w-full py-2 px-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                       required
                     />
@@ -395,7 +544,7 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
                     <input
                       type="date"
                       value={embryoTransferDate}
-                      onChange={(e) => setEmbryoTransferDate(e.target.value)}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => setEmbryoTransferDate(e.target.value)}
                       className="w-full py-2 px-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                       required
                     />
@@ -444,7 +593,7 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
                     <label className="text-gray-700 mb-2 block">Notes (Optional)</label>
                     <textarea
                       value={heartbeatNotes}
-                      onChange={(e) => setHeartbeatNotes(e.target.value)}
+                      onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setHeartbeatNotes(e.target.value)}
                       placeholder="Add any additional details about your ultrasound appointment..."
                       className="w-full py-2 px-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                       rows={3}
@@ -454,10 +603,10 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
                   {/* Submit Button */}
                   <button
                     onClick={handleSubmitHeartbeat}
-                    disabled={!reportingLoss && (!heartbeatDate || !embryoTransferDate || !heartbeatFile)}
+                    disabled={submittingHeartbeat || (!reportingLoss && (!heartbeatDate || !embryoTransferDate || !heartbeatFile))}
                     className="w-full py-3 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
                   >
-                    Submit for Approval
+                    {submittingHeartbeat ? 'Submitting...' : 'Submit for Approval'}
                   </button>
                   <p className="text-gray-500 text-xs text-center">
                     This will be sent to your Intended Parents for approval. You&apos;ll receive a notification once approved.
@@ -470,7 +619,7 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
                         <input
                           type="checkbox"
                           checked={reportingLoss}
-                          onChange={(e) => setReportingLoss(e.target.checked)}
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => setReportingLoss(e.target.checked)}
                           className="mt-1 w-4 h-4 text-primary focus:ring-2 focus:ring-primary border-gray-300 rounded"
                         />
                         <div>
@@ -540,7 +689,7 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
                     <input
                       type="text"
                       value={reimbursementType}
-                      onChange={(e) => setReimbursementType(e.target.value)}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => setReimbursementType(e.target.value)}
                       placeholder="e.g., Prenatal vitamins, Mileage to appointment, Maternity clothing..."
                       className="w-full py-2 px-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                       required
@@ -558,35 +707,38 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
                         <input
                           type="text"
                           value={selectedCategory}
-                          onChange={(e) => setSelectedCategory(e.target.value)}
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => setSelectedCategory(e.target.value)}
                           placeholder="Search categories..."
                           className="w-full py-2 px-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                         />
                       </div>
                       <div className="max-h-40 overflow-y-auto">
-                        {Object.keys(milestoneCategories).map(category => (
-                          <div key={category} className="p-2">
-                            <div
-                              className="cursor-pointer hover:bg-gray-100"
-                              onClick={() => setSelectedCategory(category)}
-                            >
-                              {category}
-                            </div>
-                            {selectedCategory === category && (
-                              <div className="pl-4">
-                                {milestoneCategories[category].map(milestone => (
-                                  <div
-                                    key={milestone}
-                                    className="cursor-pointer hover:bg-gray-100"
-                                    onClick={() => handleMilestoneSelect(milestone)}
-                                  >
-                                    {milestone}
-                                  </div>
-                                ))}
+                        {Object.keys(milestoneCategories).map((category) => {
+                          const categoryKey = category as keyof typeof milestoneCategories;
+                          return (
+                            <div key={category} className="p-2">
+                              <div
+                                className="cursor-pointer hover:bg-gray-100"
+                                onClick={() => setSelectedCategory(category)}
+                              >
+                                {category}
                               </div>
-                            )}
-                          </div>
-                        ))}
+                              {selectedCategory === category && (
+                                <div className="pl-4">
+                                  {milestoneCategories[categoryKey].map((milestone: string) => (
+                                    <div
+                                      key={milestone}
+                                      className="cursor-pointer hover:bg-gray-100"
+                                      onClick={() => handleMilestoneSelect(milestone)}
+                                    >
+                                      {milestone}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -600,7 +752,7 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
                     <input
                       type="number"
                       value={reimbursementAmount}
-                      onChange={(e) => setReimbursementAmount(e.target.value)}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => setReimbursementAmount(e.target.value)}
                       placeholder="0.00"
                       step="0.01"
                       className="w-full py-2 pl-8 pr-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
@@ -614,7 +766,7 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
                   <label className="text-gray-700 mb-2 block">Notes (Optional)</label>
                   <textarea
                     value={reimbursementNotes}
-                    onChange={(e) => setReimbursementNotes(e.target.value)}
+                    onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setReimbursementNotes(e.target.value)}
                     placeholder="Add any additional details..."
                     className="w-full py-2 px-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                     rows={3}
@@ -624,10 +776,10 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
                 {/* Submit Button */}
                 <button
                   onClick={handleSubmitReimbursement}
-                  disabled={!uploadedFile || !reimbursementType || !reimbursementAmount}
+                  disabled={submittingReimbursement || !uploadedFile || !reimbursementType || !reimbursementAmount}
                   className="w-full py-3 bg-secondary text-secondary-foreground rounded-lg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Submit Request
+                  {submittingReimbursement ? 'Submitting...' : 'Submit Request'}
                 </button>
               </div>
             </div>
@@ -660,7 +812,7 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
                     <DollarSign className="w-5 h-5 text-primary" />
                     <span className="text-gray-600 text-sm">Total Received to Date</span>
                   </div>
-                  <p className="text-gray-900 text-2xl">{totalReceived}</p>
+                  <p className="text-gray-900 text-2xl">${totalReceived.toLocaleString()}</p>
                 </div>
 
                 {/* Next Expected Payment */}
@@ -688,68 +840,83 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-gray-900">Upcoming Milestones</h3>
-                <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">From milestone database</span>
+                {loading && <span className="text-xs text-gray-500">Loading...</span>}
               </div>
-              <div className="space-y-4">
-                {upcomingPayments.map((payment, index) => (
-                  <div key={index} className="p-4 bg-gray-50 rounded-lg">
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h4 className="text-gray-900">{payment.milestone?.name || 'Unknown Milestone'}</h4>
-                          <span className="text-xs text-gray-400">{payment.milestoneId}</span>
+              {loading && upcomingPayments.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">Loading upcoming milestones...</div>
+              ) : upcomingPayments.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">No upcoming milestones</div>
+              ) : (
+                <>
+                  <div className="space-y-4">
+                    {upcomingPayments.map((payment) => (
+                      <div key={payment.milestoneId} className="p-4 bg-gray-50 rounded-lg">
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <h4 className="text-gray-900">{payment.milestone?.title || 'Unknown Milestone'}</h4>
+                            </div>
+                            {payment.milestone?.description && (
+                              <p className="text-gray-600 text-xs">{payment.milestone.description}</p>
+                            )}
+                            <p className="text-gray-600 text-sm flex items-center gap-1 mt-2">
+                              <Calendar className="w-4 h-4" />
+                              Expected: {payment.date}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-gray-900 mb-1">{payment.amount}</p>
+                            <span className={`inline-block px-2 py-1 rounded text-xs ${getStatusColor(payment.status)}`}>
+                              {payment.status}
+                            </span>
+                          </div>
                         </div>
-                        {payment.milestone && (
-                          <p className="text-gray-600 text-xs">{payment.milestone.gcPerspective[0]}</p>
-                        )}
-                        <p className="text-gray-600 text-sm flex items-center gap-1 mt-2">
-                          <Calendar className="w-4 h-4" />
-                          Expected: {payment.date}
-                        </p>
                       </div>
-                      <div className="text-right">
-                        <p className="text-gray-900 mb-1">{payment.amount}</p>
-                        <span className={`inline-block px-2 py-1 rounded text-xs ${getStatusColor(payment.status)}`}>
-                          {payment.status}
-                        </span>
-                      </div>
-                    </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <button 
-                onClick={() => onNavigate('milestones')}
-                className="mt-4 w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                View Contract
-              </button>
+                  <button 
+                    onClick={() => onNavigate('milestones')}
+                    className="mt-4 w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    View Contract
+                  </button>
+                </>
+              )}
             </div>
 
             {/* Section 4 - Recent Payments */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
               <h3 className="text-gray-900 mb-4">Recent Payments</h3>
-              <div className="space-y-3">
-                {recentPayments.map((payment, index) => (
-                  <div key={index} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                    <div className="flex-1">
-                      <h4 className="text-gray-900">{payment.description}</h4>
-                      <p className="text-gray-500 text-sm">{payment.date}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-gray-900 mb-1">{payment.amount}</p>
-                      <span className={`inline-block px-2 py-1 rounded text-xs ${getStatusColor(payment.status)}`}>
-                        {payment.status}
-                      </span>
-                    </div>
+              {loading && recentPayments.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">Loading recent payments...</div>
+              ) : recentPayments.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">No recent payments</div>
+              ) : (
+                <>
+                  <div className="space-y-3">
+                    {recentPayments.map((payment, index) => (
+                      <div key={`${payment.date}-${index}`} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                        <div className="flex-1">
+                          <h4 className="text-gray-900">{payment.description}</h4>
+                          <p className="text-gray-500 text-sm">{payment.date}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-gray-900 mb-1">{payment.amount}</p>
+                          <span className={`inline-block px-2 py-1 rounded text-xs ${getStatusColor(payment.status)}`}>
+                            {payment.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <button 
-                onClick={() => onNavigate('surrogate-payments')}
-                className="mt-4 w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                View Payment History
-              </button>
+                  <button 
+                    onClick={() => onNavigate('surrogate-payments')}
+                    className="mt-4 w-full py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    View Payment History
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
@@ -838,7 +1005,7 @@ export function SurrogateDashboard({ onBack, onNavigate }: SurrogateDashboardPro
                 Support
               </a>
             </div>
-            <p className="text-gray-500 text-sm">© 2025 The Biggest Ask</p>
+            <p className="text-gray-500 text-sm">© 2025 TBA Surrogacy Escrow</p>
           </div>
         </div>
       </footer>

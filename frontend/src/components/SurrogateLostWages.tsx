@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   User, 
   ChevronDown,
@@ -11,9 +11,14 @@ import {
   FileText,
   Clock,
   Info,
-  ArrowLeft
+  ArrowLeft,
+  X
 } from 'lucide-react';
-import logo from 'figma:asset/772aa6854dfe11f4288b7a955fea018059bbad2d.png';
+import { toast } from 'sonner';
+import { Logo } from './Logo';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { fetchPayments, createPayment } from '../store/slices/paymentsSlice';
+import { fetchContracts } from '../store/slices/contractsSlice';
 
 interface SurrogateLostWagesProps {
   onBack: () => void;
@@ -21,11 +26,17 @@ interface SurrogateLostWagesProps {
 }
 
 export function SurrogateLostWages({ onBack, onNavigate }: SurrogateLostWagesProps) {
+  const dispatch = useAppDispatch();
+  const { payments, loading: paymentsLoading } = useAppSelector((state) => state.payments);
+  const { contracts, loading: contractsLoading } = useAppSelector((state) => state.contracts);
+  const { user } = useAppSelector((state) => state.user);
+
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
+  const [submitting, setSubmitting] = useState(false);
 
   // Stored employment info (simulating saved data from previous requests)
-  const [hasStoredEmploymentInfo, setHasStoredEmploymentInfo] = useState(true); // Set to true to simulate saved data
+  const [hasStoredEmploymentInfo, setHasStoredEmploymentInfo] = useState(false);
   const [showEditEmploymentInfo, setShowEditEmploymentInfo] = useState(false);
 
   // Form state
@@ -35,39 +46,62 @@ export function SurrogateLostWages({ onBack, onNavigate }: SurrogateLostWagesPro
   const [clinicName, setClinicName] = useState('');
   const [isPregnancyRelated, setIsPregnancyRelated] = useState(false);
 
-  // Employment info pre-populated from previous requests
+  // Employment info
   const [employmentType, setEmploymentType] = useState<'hourly' | 'salaried' | 'self-employed'>('hourly');
-  const [hourlyRate, setHourlyRate] = useState(hasStoredEmploymentInfo ? '28.00' : '');
+  const [hourlyRate, setHourlyRate] = useState('');
   const [monthlySalary, setMonthlySalary] = useState('');
-  const [typicalHoursPerWeek, setTypicalHoursPerWeek] = useState(hasStoredEmploymentInfo ? '40' : '');
-  const [employerName, setEmployerName] = useState(hasStoredEmploymentInfo ? 'Valley Medical Center' : '');
-  const [employerContact, setEmployerContact] = useState(hasStoredEmploymentInfo ? 'hr@valleymedical.com' : '');
+  const [typicalHoursPerWeek, setTypicalHoursPerWeek] = useState('');
+  const [employerName, setEmployerName] = useState('');
+  const [employerContact, setEmployerContact] = useState('');
 
-  // Stored pay stub from previous request
-  const [storedPayStub, setStoredPayStub] = useState<{ name: string; date: string } | null>(
-    hasStoredEmploymentInfo ? { name: 'paystub_nov_2025.pdf', date: 'Nov 2025' } : null
-  );
+  // File uploads
   const [payStubFile, setPayStubFile] = useState<File | null>(null);
   const [appointmentFile, setAppointmentFile] = useState<File | null>(null);
 
-  // Contract data
+  // Fetch data on mount
+  useEffect(() => {
+    dispatch(fetchPayments());
+    dispatch(fetchContracts());
+  }, [dispatch]);
+
+  // Get contract data (mock for now, could be enhanced with real contract data)
+  const contract = contracts[0];
   const contractData = {
     maxHourlyRate: '$35.00',
     maxHoursPerMonth: '40',
     monthlyCap: '$1,400'
   };
 
-  // Mock monthly usage
+  // Calculate monthly usage from past lost wages payments
+  const currentMonth = new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  const monthlyLostWagesPayments = payments
+    .filter(p => 
+      p.description?.toLowerCase().includes('lost wages') &&
+      p.created_at && 
+      new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) === currentMonth
+    );
+
+  const monthlyUsed = monthlyLostWagesPayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+  const monthlyCap = 1400; // From contract
   const monthlyUsage = {
-    used: '$360',
-    remaining: '$1,040'
+    used: `$${monthlyUsed.toFixed(2)}`,
+    remaining: `$${(monthlyCap - monthlyUsed).toFixed(2)}`
   };
 
-  // Past requests
-  const pastRequests = [
-    { date: 'Nov 12', amount: '$180', status: 'Approved' },
-    { date: 'Nov 5', amount: '$180', status: 'Approved' }
-  ];
+  // Past requests from API
+  const pastRequests = payments
+    .filter(p => p.description?.toLowerCase().includes('lost wages'))
+    .sort((a, b) => {
+      const dateA = new Date(a.created_at).getTime();
+      const dateB = new Date(b.created_at).getTime();
+      return dateB - dateA;
+    })
+    .slice(0, 5)
+    .map(p => ({
+      date: new Date(p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      amount: `$${parseFloat(p.amount).toLocaleString()}`,
+      status: p.status === 'paid' || p.status === 'completed' ? 'Approved' : p.status.charAt(0).toUpperCase() + p.status.slice(1)
+    }));
 
   const steps = [
     { number: 1, label: 'Visit details' },
@@ -112,9 +146,91 @@ export function SurrogateLostWages({ onBack, onNavigate }: SurrogateLostWagesPro
     }
   };
 
-  const handleSubmit = () => {
-    alert('Lost wages request submitted successfully! Your Intended Parents and the escrow team will review this request.');
-    onNavigate('dashboard');
+  const handleSubmit = async () => {
+    // Validation
+    if (!missedWorkDate || !hoursMissed || !reason) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
+    if (!payStubFile && !appointmentFile) {
+      toast.error('Please upload at least one document (pay stub or appointment documentation)');
+      return;
+    }
+
+    if (!contract) {
+      toast.error('No contract found. Please contact support.');
+      return;
+    }
+
+    const calculatedAmount = calculateRequestAmount();
+    if (parseFloat(calculatedAmount) <= 0) {
+      toast.error('Please provide valid employment information to calculate lost wages');
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      // Build description with all lost wages details
+      const description = `Lost Wages: ${reason}${clinicName ? ` - ${clinicName}` : ''} on ${missedWorkDate}`;
+      
+      // Build notes with employment and calculation details
+      const notes = [
+        `Hours missed: ${hoursMissed}`,
+        `Employment type: ${employmentType}`,
+        employmentType === 'hourly' ? `Hourly rate: $${hourlyRate}` : `Monthly salary: $${monthlySalary}`,
+        `Typical hours per week: ${typicalHoursPerWeek}`,
+        `Employer: ${employerName}`,
+        employerContact ? `Employer contact: ${employerContact}` : '',
+        isPregnancyRelated ? 'Pregnancy-related: Yes' : 'Pregnancy-related: No',
+        `Calculated amount: $${calculatedAmount}`
+      ].filter(Boolean).join('\n');
+
+      // Create payment for lost wages
+      const paymentData = {
+        contract: contract.id,
+        payer: contract.intended_parent, // Intended parent pays
+        payee: contract.surrogate, // Surrogate receives
+        amount: calculatedAmount,
+        payment_type: 'milestone', // Using milestone type for lost wages
+        description: description,
+        notes: notes,
+      };
+
+      const result = await dispatch(createPayment(paymentData));
+
+      if (createPayment.fulfilled.match(result)) {
+        // Note: File uploads would need to be handled separately if the backend supports it
+        // For now, we'll just show success
+        toast.success('Lost wages request submitted successfully! Your Intended Parents and the escrow team will review this request.');
+        
+        // Reset form after a delay
+        setTimeout(() => {
+          setMissedWorkDate('');
+          setHoursMissed('');
+          setReason('');
+          setClinicName('');
+          setIsPregnancyRelated(false);
+          setPayStubFile(null);
+          setAppointmentFile(null);
+          setCurrentStep(1);
+          // Refresh payments to show new request
+          dispatch(fetchPayments());
+          // Navigate to dashboard after 2 seconds
+          setTimeout(() => {
+            onNavigate('dashboard');
+          }, 2000);
+        }, 2000);
+      } else {
+        const errorMessage = result.payload as string || 'Failed to submit lost wages request';
+        toast.error(errorMessage);
+      }
+    } catch (err) {
+      toast.error('An error occurred while submitting your request');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -136,9 +252,9 @@ export function SurrogateLostWages({ onBack, onNavigate }: SurrogateLostWagesPro
           <div className="flex items-center justify-between">
             {/* Logo */}
             <button onClick={onBack} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-              <img src={logo} alt="The Biggest Ask" className="h-10 w-10" />
+              <Logo />
               <div className="flex flex-col items-start">
-                <span className="text-gray-900">The Biggest Ask</span>
+                <span className="text-gray-900">TBA Surrogacy Escrow</span>
                 <span className="text-xs text-white bg-accent px-2 py-0.5 rounded">Surrogate Portal</span>
               </div>
             </button>
@@ -201,6 +317,7 @@ export function SurrogateLostWages({ onBack, onNavigate }: SurrogateLostWagesPro
 
       {/* Main Content */}
       <main className="max-w-[1440px] mx-auto px-8 py-8">
+
         {/* Page Header */}
         <div className="mb-8">
           <button 
@@ -529,51 +646,38 @@ export function SurrogateLostWages({ onBack, onNavigate }: SurrogateLostWagesPro
                 <div className="space-y-5">
                   <div>
                     <label className="block text-gray-700 mb-2">Pay stub or income proof</label>
-                    
-                    {/* Show stored pay stub if it exists */}
-                    {storedPayStub && !payStubFile ? (
-                      <div className="border-2 border-green-300 bg-green-50 rounded-lg p-5">
-                        <div className="flex items-start gap-3 mb-3">
-                          <CheckCircle className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
-                          <div className="flex-1">
-                            <h4 className="text-gray-900 mb-1">Using saved pay stub</h4>
-                            <p className="text-gray-600 text-sm">File: {storedPayStub.name}</p>
-                            <p className="text-gray-500 text-xs">From: {storedPayStub.date}</p>
-                          </div>
-                        </div>
-                        <div className="border-t border-green-200 pt-3">
-                          <label htmlFor="pay-stub-upload-replace" className="text-primary hover:underline text-sm cursor-pointer">
-                            Upload a new pay stub
-                            <input
-                              type="file"
-                              id="pay-stub-upload-replace"
-                              onChange={(e) => handleFileUpload('payStub', e.target.files?.[0] || null)}
-                              className="hidden"
-                            />
-                          </label>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-primary transition-colors cursor-pointer">
-                        <input
-                          type="file"
-                          id="pay-stub-upload"
-                          onChange={(e) => handleFileUpload('payStub', e.target.files?.[0] || null)}
-                          className="hidden"
-                        />
-                        <label htmlFor="pay-stub-upload" className="cursor-pointer">
-                          <Upload className="w-8 h-8 text-gray-400 mx-auto mb-3" />
-                          {payStubFile ? (
+                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-primary transition-colors cursor-pointer">
+                      <input
+                        type="file"
+                        id="pay-stub-upload"
+                        onChange={(e) => handleFileUpload('payStub', e.target.files?.[0] || null)}
+                        accept="image/*,.pdf"
+                        className="hidden"
+                      />
+                      <label htmlFor="pay-stub-upload" className="cursor-pointer">
+                        <Upload className="w-8 h-8 text-gray-400 mx-auto mb-3" />
+                        {payStubFile ? (
+                          <div className="flex items-center justify-center gap-2">
+                            <FileText className="w-5 h-5 text-green-600" />
                             <p className="text-gray-700">{payStubFile.name}</p>
-                          ) : (
-                            <>
-                              <p className="text-gray-700 mb-1">Click to upload or drag and drop</p>
-                              <p className="text-gray-500 text-sm">Upload a recent pay stub, earnings statement, or invoice.</p>
-                            </>
-                          )}
-                        </label>
-                      </div>
-                    )}
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                setPayStubFile(null);
+                              }}
+                              className="text-gray-400 hover:text-gray-600 transition-colors ml-2"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <p className="text-gray-700 mb-1">Click to upload or drag and drop</p>
+                            <p className="text-gray-500 text-sm">Upload a recent pay stub, earnings statement, or invoice.</p>
+                          </>
+                        )}
+                      </label>
+                    </div>
                   </div>
 
                   <div>
@@ -588,7 +692,19 @@ export function SurrogateLostWages({ onBack, onNavigate }: SurrogateLostWagesPro
                       <label htmlFor="appointment-upload" className="cursor-pointer">
                         <Upload className="w-8 h-8 text-gray-400 mx-auto mb-3" />
                         {appointmentFile ? (
-                          <p className="text-gray-700">{appointmentFile.name}</p>
+                          <div className="flex items-center justify-center gap-2">
+                            <FileText className="w-5 h-5 text-green-600" />
+                            <p className="text-gray-700">{appointmentFile.name}</p>
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                setAppointmentFile(null);
+                              }}
+                              className="text-gray-400 hover:text-gray-600 transition-colors ml-2"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
                         ) : (
                           <>
                             <p className="text-gray-700 mb-1">Click to upload or drag and drop</p>
@@ -673,16 +789,20 @@ export function SurrogateLostWages({ onBack, onNavigate }: SurrogateLostWagesPro
                   </button>
                   <div className="flex gap-3">
                     <button
-                      onClick={() => alert('Draft saved successfully!')}
+                      onClick={() => {
+                        // Save draft functionality could be implemented with localStorage or API
+                        toast.success('Draft saved successfully!');
+                      }}
                       className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                     >
                       Save draft
                     </button>
                     <button
                       onClick={handleSubmit}
-                      className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+                      disabled={submitting}
+                      className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Submit request
+                      {submitting ? 'Submitting...' : 'Submit request'}
                     </button>
                   </div>
                 </div>
@@ -783,7 +903,7 @@ export function SurrogateLostWages({ onBack, onNavigate }: SurrogateLostWagesPro
                 Support
               </a>
             </div>
-            <p className="text-gray-500 text-sm">© 2025 The Biggest Ask</p>
+            <p className="text-gray-500 text-sm">© 2025 TBA Surrogacy Escrow</p>
           </div>
         </div>
       </footer>

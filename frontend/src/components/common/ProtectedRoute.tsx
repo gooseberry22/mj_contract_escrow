@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
-import { useAppSelector, useAppDispatch } from '../store/hooks';
-import { fetchProfile } from '../store/slices/userSlice';
+import { useAppSelector, useAppDispatch } from '../../store/hooks';
+import { fetchProfile } from '../../store/slices/userSlice';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;

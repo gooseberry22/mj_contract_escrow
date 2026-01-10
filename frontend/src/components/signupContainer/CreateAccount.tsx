@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { Shield, FileCheck, Bot, Bell, Upload } from 'lucide-react';
 import { toast } from 'sonner';
-import { Logo } from './Logo';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { signup, clearError } from '../store/slices/userSlice';
+import { Logo } from '../header/Logo';
+import { useAppDispatch, useAppSelector } from '../../store/hooks';
+import { signup, clearError } from '../../store/slices/userSlice';
 
 interface CreateAccountProps {
   onBack: () => void;

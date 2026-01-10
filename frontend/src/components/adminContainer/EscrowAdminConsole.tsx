@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Search, AlertCircle, ArrowLeft, FileText, DollarSign, Edit2, Save, Upload, Download, ZoomIn, ZoomOut, Eye, Check, X, Paperclip } from 'lucide-react';
-import { Logo } from './Logo';
+import { Logo } from '../header/Logo';
 
 interface Journey {
   id: string;

@@ -9,7 +9,7 @@ import {
   Home,
   TrendingUp
 } from 'lucide-react';
-import { MILESTONE_DATABASE, type MilestoneDefinition } from '../data/milestoneData';
+import { MILESTONE_DATABASE, type MilestoneDefinition } from '../../data/milestoneData';
 
 export function MilestoneDatabase() {
   const milestones = MILESTONE_DATABASE;

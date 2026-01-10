@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { ArrowLeft, Shield, FileCheck, Bot } from 'lucide-react';
 import { toast } from 'sonner';
-import { Logo } from './Logo';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { login, clearError } from '../store/slices/userSlice';
+import { Logo } from '../header/Logo';
+import { useAppDispatch, useAppSelector } from '../../store/hooks';
+import { login, clearError } from '../../store/slices/userSlice';
 
 interface LoginProps {
   onBack: () => void;
